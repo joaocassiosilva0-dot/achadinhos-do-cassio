@@ -1,0 +1,232 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Achadinhos do Cássio</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#090d09;color:white;font-family:Arial}
+header{text-align:center;padding:25px;background:#111811;border-bottom:2px solid #9cff00}
+h1{color:#9cff00;margin:0}
+main{max-width:950px;margin:auto;padding:18px}
+button{background:#9cff00;color:#101510;border:0;padding:13px;border-radius:8px;font-weight:bold;cursor:pointer;margin:5px 0}
+input,textarea{width:100%;padding:13px;margin:7px 0 12px;border-radius:7px;border:1px solid #526052;background:#172017;color:white}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px}
+.card{background:#172017;border:1px solid #354535;border-radius:12px;padding:12px}
+.card img{width:100%;height:150px;object-fit:contain;background:white;border-radius:8px}
+.price{color:#9cff00;font-size:22px;font-weight:bold}
+.hidden{display:none}
+.small{color:#aaa;font-size:13px}
+</style>
+</head>
+<body>
+<header>
+<h1>ACHADINHOS DO CÁSSIO</h1>
+<p>OFERTAS • PROMOÇÕES • ACHADOS</p>
+</header>
+
+<main>
+<section>
+<h2>Encontre seu próximo achadinho!</h2>
+<input id="busca" placeholder="Buscar produto..." oninput="mostrarVitrine()">
+<div id="vitrine" class="grid"></div>
+</section>
+
+<section>
+<button onclick="abrirLogin()">Acessar painel administrativo</button>
+</section>
+
+<section id="login" class="hidden">
+<h2>Entrar no painel</h2>
+<input id="email" type="email" placeholder="E-mail">
+<input id="senha" type="password" placeholder="Senha">
+<button onclick="entrar()">Entrar</button>
+<p id="mensagem"></p>
+</section>
+
+<section id="painel" class="hidden">
+<h2>Central de produtos</h2>
+<h3>Adicionar pelo link</h3>
+<input id="urlProduto" placeholder="Cole o link do Mercado Livre ou meli.la">
+<button onclick="buscarProduto()">BUSCAR PRODUTO AUTOMATICAMENTE</button>
+<p id="buscaStatus" class="small"></p>
+
+<hr>
+<h3>Conferir informações</h3>
+<input id="nome" placeholder="Nome do produto">
+<textarea id="descricao" placeholder="Descrição"></textarea>
+<input id="preco" type="number" step="0.01" placeholder="Preço">
+<input id="categoria" placeholder="Categoria">
+<input id="imagem" placeholder="Link da imagem">
+<input id="link" placeholder="Link de afiliado">
+<label><input id="ativo" type="checkbox" checked style="width:auto"> Produto ativo na vitrine</label>
+<button onclick="salvar()">PUBLICAR NA VITRINE</button>
+<button onclick="limpar()">Limpar campos</button>
+<button onclick="sair()" style="background:#555;color:white">Sair</button>
+<p id="status"></p>
+<h3>Produtos cadastrados</h3>
+<div id="lista" class="grid"></div>
+</section>
+</main>
+
+<script>
+const URL_BANCO = "https://dvxkfpvxjdjdutjqumsp.supabase.co";
+const CHAVE_PUBLICA = "sb_publishable_cgEP5dEJjn4X-_UL6E5CAg_JxcFQIoB";
+
+const db = window.supabase.createClient(URL_BANCO,CHAVE_PUBLICA);
+let produtos = [];
+let editando = null;
+
+function esc(v){
+ return String(v??"").replace(/[&<>"']/g,c=>({
+ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+ }[c]));
+}
+
+async function carregar(){
+ const {data,error}=await db.from("produtos")
+ .select("*").eq("ativo",true).order("criado_em",{ascending:false});
+ if(error)return;
+ produtos=data||[];
+ mostrarVitrine();
+}
+
+function mostrarVitrine(){
+ const termo=document.getElementById("busca").value.toLowerCase();
+ const itens=produtos.filter(p=>(p.nome||"").toLowerCase().includes(termo));
+ document.getElementById("vitrine").innerHTML=itens.map(p=>`
+ <article class="card">
+ ${p.imagem_url?`<img src="${esc(p.imagem_url)}" alt="">`:""}
+ <h3>${esc(p.nome)}</h3>
+ <p>${esc(p.descricao||"")}</p>
+ <div class="price">R$ ${Number(p.preco||0).toFixed(2).replace(".",",")}</div>
+ <a href="${esc(p.link_afiliado)}" target="_blank" rel="noopener" style="color:#9cff00">VER OFERTA</a>
+ </article>`).join("");
+}
+
+function abrirLogin(){
+ document.getElementById("login").classList.remove("hidden");
+}
+
+async function entrar(){
+ const email=document.getElementById("email").value;
+ const password=document.getElementById("senha").value;
+ const {error}=await db.auth.signInWithPassword({email,password});
+ if(error){
+ document.getElementById("mensagem").textContent="Confira seu e-mail e senha.";
+ return;
+ }
+ const {data:userData}=await db.auth.getUser();
+ const {data:admin}=await db.from("admins").select("id")
+ .eq("id",userData.user.id).maybeSingle();
+ if(!admin){
+ await db.auth.signOut();
+ document.getElementById("mensagem").textContent="Acesso não autorizado.";
+ return;
+ }
+ document.getElementById("login").classList.add("hidden");
+ document.getElementById("painel").classList.remove("hidden");
+ carregarAdmin();
+}
+
+async function buscarProduto(){
+ const link=document.getElementById("urlProduto").value.trim();
+ const status=document.getElementById("buscaStatus");
+ if(!link){status.textContent="Cole o link do produto primeiro.";return;}
+ const {data:{session}}=await db.auth.getSession();
+ if(!session){status.textContent="Entre novamente no painel.";return;}
+ status.textContent="A integração de busca automática será ativada na próxima etapa.";
+ // A função importar-produto será criada no Supabase.
+ // Ela buscará os dados do anúncio e devolverá os campos do produto.
+}
+
+async function salvar(){
+ const produto={
+ nome:document.getElementById("nome").value.trim(),
+ descricao:document.getElementById("descricao").value.trim(),
+ preco:Number(document.getElementById("preco").value),
+ categoria:document.getElementById("categoria").value.trim(),
+ imagem_url:document.getElementById("imagem").value.trim(),
+ link_afiliado:document.getElementById("link").value.trim(),
+ ativo:document.getElementById("ativo").checked
+ };
+ if(!produto.nome||!produto.link_afiliado||
+ !Number.isFinite(produto.preco)||produto.preco<0){
+ document.getElementById("status").textContent="Preencha nome, preço e link.";
+ return;
+ }
+ let result;
+ if(editando){
+ result=await db.from("produtos").update(produto).eq("id",editando);
+ }else{
+ result=await db.from("produtos").insert(produto);
+ }
+ document.getElementById("status").textContent=
+ result.error?result.error.message:"Produto salvo com sucesso!";
+ if(!result.error){
+ limpar();
+ carregarAdmin();
+ carregar();
+ }
+}
+
+async function carregarAdmin(){
+ const {data,error}=await db.from("produtos")
+ .select("*").order("criado_em",{ascending:false});
+ if(error){
+ document.getElementById("status").textContent=error.message;
+ return;
+ }
+ document.getElementById("lista").innerHTML=(data||[]).map(p=>`
+ <article class="card">
+ <b>${esc(p.nome)}</b>
+ <p>R$ ${Number(p.preco||0).toFixed(2)}</p>
+ <p>${p.ativo?"Ativo":"Inativo"}</p>
+ <button onclick="editar('${p.id}')">Editar</button>
+ <button onclick="excluir('${p.id}')" style="background:#b33;color:white">Excluir</button>
+ </article>`).join("");
+}
+
+async function editar(id){
+ const {data,error}=await db.from("produtos").select("*").eq("id",id).single();
+ if(error||!data)return;
+ editando=id;
+ document.getElementById("nome").value=data.nome||"";
+ document.getElementById("descricao").value=data.descricao||"";
+ document.getElementById("preco").value=data.preco||"";
+ document.getElementById("categoria").value=data.categoria||"";
+ document.getElementById("imagem").value=data.imagem_url||"";
+ document.getElementById("link").value=data.link_afiliado||"";
+ document.getElementById("ativo").checked=data.ativo;
+ window.scrollTo(0,document.body.scrollHeight);
+}
+
+async function excluir(id){
+ if(!confirm("Deseja excluir este produto?"))return;
+ const {error}=await db.from("produtos").delete().eq("id",id);
+ document.getElementById("status").textContent=
+ error?error.message:"Produto excluído.";
+ carregarAdmin();
+ carregar();
+}
+
+function limpar(){
+ editando=null;
+ ["nome","descricao","preco","categoria","imagem","link","urlProduto"]
+ .forEach(id=>document.getElementById(id).value="");
+ document.getElementById("ativo").checked=true;
+}
+
+async function sair(){
+ await db.auth.signOut();
+ document.getElementById("painel").classList.add("hidden");
+ document.getElementById("login").classList.add("hidden");
+}
+
+carregar();
+</script>
+</body>
+</html>
