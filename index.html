@@ -135,12 +135,41 @@ async function entrar(){
 async function buscarProduto(){
  const link=document.getElementById("urlProduto").value.trim();
  const status=document.getElementById("buscaStatus");
- if(!link){status.textContent="Cole o link do produto primeiro.";return;}
+
+ if(!link){
+   status.textContent="Cole o link do produto primeiro.";
+   return;
+ }
+
  const {data:{session}}=await db.auth.getSession();
- if(!session){status.textContent="Entre novamente no painel.";return;}
- status.textContent="A integração de busca automática será ativada na próxima etapa.";
- // A função importar-produto será criada no Supabase.
- // Ela buscará os dados do anúncio e devolverá os campos do produto.
+
+ if(!session){
+   status.textContent="Entre novamente no painel.";
+   return;
+ }
+
+ status.textContent="Buscando informações do produto...";
+
+ try {
+   const {data,error}=await db.functions.invoke("importar-produto",{
+     body:{url:link}
+   });
+
+   if(error) throw error;
+   if(data?.error) throw new Error(data.error);
+
+   document.getElementById("nome").value=data.nome||"";
+   document.getElementById("descricao").value=data.descricao||"";
+   document.getElementById("preco").value=data.preco||"";
+   document.getElementById("categoria").value=data.categoria||"";
+   document.getElementById("imagem").value=data.imagem_url||"";
+   document.getElementById("link").value=data.link_afiliado||link;
+
+   status.textContent="Produto encontrado! Confira os dados e publique.";
+ } catch(error) {
+   status.textContent="Erro ao buscar produto. Confira o link e tente novamente.";
+   console.error(error);
+ }
 }
 
 async function salvar(){
